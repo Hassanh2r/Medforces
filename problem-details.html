@@ -1,0 +1,302 @@
+<script type="text/javascript">
+        var gk_isXlsx = false;
+        var gk_xlsxFileLookup = {};
+        var gk_fileData = {};
+        function filledCell(cell) {
+          return cell !== '' && cell != null;
+        }
+        function loadFileData(filename) {
+        if (gk_isXlsx && gk_xlsxFileLookup[filename]) {
+            try {
+                var workbook = XLSX.read(gk_fileData[filename], { type: 'base64' });
+                var firstSheetName = workbook.SheetNames[0];
+                var worksheet = workbook.Sheets[firstSheetName];
+
+                // Convert sheet to JSON to filter blank rows
+                var jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, blankrows: false, defval: '' });
+                // Filter out blank rows (rows where all cells are empty, null, or undefined)
+                var filteredData = jsonData.filter(row => row.some(filledCell));
+
+                // Heuristic to find the header row by ignoring rows with fewer filled cells than the next row
+                var headerRowIndex = filteredData.findIndex((row, index) =>
+                  row.filter(filledCell).length >= filteredData[index + 1]?.filter(filledCell).length
+                );
+                // Fallback
+                if (headerRowIndex === -1 || headerRowIndex > 25) {
+                  headerRowIndex = 0;
+                }
+
+                // Convert filtered JSON back to CSV
+                var csv = XLSX.utils.aoa_to_sheet(filteredData.slice(headerRowIndex)); // Create a new sheet from filtered array of arrays
+                csv = XLSX.utils.sheet_to_csv(csv, { header: 1 });
+                return csv;
+            } catch (e) {
+                console.error(e);
+                return "";
+            }
+        }
+        return gk_fileData[filename] || "";
+        }
+        </script><!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MedForces - Problem Details</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <style>
+    .sidebar {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 250px;
+      height: 100%;
+      background-color: #3b82f6;
+      padding: 1rem;
+      z-index: 1000;
+      transform: translateX(-100%);
+      transition: transform 0.3s ease-in-out;
+    }
+    .sidebar.show {
+      transform: translateX(0);
+    }
+    .sidebar a {
+      display: block;
+      padding: 0.5rem;
+      color: white;
+      text-decoration: none;
+    }
+    .sidebar a:hover {
+      text-decoration: underline;
+    }
+    .sidebar .close-btn {
+      font-size: 1.5rem;
+      cursor: pointer;
+      color: white;
+      margin-bottom: 1rem;
+    }
+    .backdrop {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background-color: rgba(0, 0, 0, 0.5);
+      z-index: 999;
+      opacity: 0;
+      transition: opacity 0.3s ease-in-out;
+    }
+    .backdrop.show {
+      display: block;
+      opacity: 1;
+    }
+    .feedback-message {
+      display: none;
+      padding: 1rem;
+      border-radius: 0.5rem;
+      margin-top: 1rem;
+    }
+    .feedback-message.success {
+      display: block;
+      background-color: #d1fae5;
+      color: #065f46;
+    }
+    .feedback-message.error {
+      display: block;
+      background-color: #fee2e2;
+      color: #991b1b;
+    }
+  </style>
+</head>
+<body class="bg-gray-100 font-sans">
+  <!-- Backdrop -->
+  <div id="backdrop" class="backdrop"></div>
+
+  <!-- Header -->
+  <header class="bg-blue-500 text-white py-4 shadow-md">
+    <div class="container mx-auto px-4 flex justify-between items-center">
+      <div class="flex items-center space-x-4">
+        <button id="menu-toggle" class="text-2xl">☰</button>
+        <h1 class="text-3xl font-bold">MedForces</h1>
+      </div>
+      <div>
+        <a id="login-link" href="login.html" class="hover:underline hidden">Login</a>
+        <button id="logout-btn" class="hover:underline hidden">Logout</button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Sidebar -->
+  <nav id="sidebar" class="sidebar">
+    <div class="close-btn" id="close-sidebar">☰</div>
+    <a href="index.html">Home</a>
+    <a href="contests.html">Contests</a>
+    <a href="problems.html" class="underline">Problems</a>
+    <a href="leaderboard.html">Leaderboard</a>
+    <a href="profile.html">Profile</a>
+    <a href="editorials.html">Editorials</a>
+  </nav>
+
+  <!-- Problem Details Section -->
+  <section class="bg-white py-12">
+    <div class="container mx-auto px-4">
+      <h2 class="text-3xl font-bold text-gray-800 text-center mb-8">Problem Details</h2>
+      <div class="max-w-3xl mx-auto bg-blue-50 p-8 rounded-lg shadow-md">
+        <h3 id="problem-title" class="text-2xl font-semibold text-blue-800 mb-4"></h3>
+        <p id="problem-description" class="text-gray-600 mb-4"></p>
+        <div class="mb-6">
+          <h4 class="text-xl font-semibold text-gray-800 mb-2">Problem Statement</h4>
+          <p id="problem-statement" class="text-gray-600"></p>
+        </div>
+        <div class="mb-6">
+          <h4 class="text-xl font-semibold text-gray-800 mb-2">Example</h4>
+          <p id="problem-example" class="text-gray-600"></p>
+        </div>
+        <div class="mb-6">
+          <h4 class="text-xl font-semibold text-gray-800 mb-2">Submission</h4>
+          <textarea id="solution-input" class="w-full p-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" rows="5" placeholder="Enter your solution here (e.g., diagnosis, tests, treatment)..."></textarea>
+          <button id="submit-solution" class="mt-2 bg-blue-500 text-white px-4 py-2 rounded-lg hover:bg-blue-600 transition">Submit Solution</button>
+          <div id="feedback" class="feedback-message"></div>
+        </div>
+        <div class="text-center">
+          <a href="editorial-details.html" class="text-blue-500 hover:underline">Read Editorial</a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Footer -->
+  <footer class="bg-blue-500 text-white py-4">
+    <div class="container mx-auto px-4 text-center">
+      <p>© 2025 MedForces. All rights reserved.</p>
+    </div>
+  </footer>
+
+  <!-- JavaScript for Sidebar Toggle, Backdrop, Authentication, and Dynamic Content -->
+  <script>
+    // Initialize Supabase client
+    const supabase = Supabase.createClient('https://rolqigegxqxuxfgvcvnm.supabase.co', 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJvbHFpZ2VneHF4dXhmZ3Zjdm5tIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTE3MzY2MDgsImV4cCI6MjA2NzMxMjYwOH0.9SI83UnlBu-HVT2u77uYkAS2xyqsMff3tkmzzMf20Ww');
+
+    // Toggle sidebar and backdrop
+    const sidebar = document.getElementById('sidebar');
+    const backdrop = document.getElementById('backdrop');
+    document.getElementById('menu-toggle').addEventListener('click', () => {
+      sidebar.classList.toggle('show');
+      backdrop.classList.toggle('show');
+    });
+    document.getElementById('close-sidebar').addEventListener('click', () => {
+      sidebar.classList.remove('show');
+      backdrop.classList.remove('show');
+    });
+    backdrop.addEventListener('click', () => {
+      sidebar.classList.remove('show');
+      backdrop.classList.remove('show');
+    });
+
+    // Handle user authentication
+    async function checkUser() {
+      const { data: { user }, error } = await supabase.auth.getUser();
+      const loginLink = document.getElementById('login-link');
+      const logoutBtn = document.getElementById('logout-btn');
+      if (error || !user) {
+        loginLink.classList.remove('hidden');
+        logoutBtn.classList.add('hidden');
+      } else {
+        loginLink.classList.add('hidden');
+        logoutBtn.classList.remove('hidden');
+        logoutBtn.textContent = `Logout (${user.email})`;
+      }
+      return user;
+    }
+
+    document.getElementById('logout-btn').addEventListener('click', async () => {
+      const { error } = await supabase.auth.signOut();
+      if (!error) {
+        window.location.reload();
+      }
+    });
+
+    // Load problem content dynamically
+    async function loadProblem() {
+      const urlParams = new URLSearchParams(window.location.search);
+      const problemId = urlParams.get('id');
+      const problemTitle = document.getElementById('problem-title');
+      const problemDescription = document.getElementById('problem-description');
+      const problemStatement = document.getElementById('problem-statement');
+      const problemExample = document.getElementById('problem-example');
+      const solutionInput = document.getElementById('solution-input');
+      const submitButton = document.getElementById('submit-solution');
+      const feedbackDiv = document.getElementById('feedback');
+
+      // Fetch problem data
+      const { data: problem, error } = await supabase
+        .from('problems')
+        .select('*')
+        .eq('id', problemId)
+        .single();
+
+      if (error || !problem) {
+        problemTitle.textContent = 'Problem Not Found';
+        problemDescription.textContent = 'The requested problem does not exist.';
+        problemStatement.innerHTML = '';
+        problemExample.innerHTML = '';
+        submitButton.disabled = true;
+        return;
+      }
+
+      problemTitle.textContent = problem.title;
+      problemDescription.textContent = problem.description;
+      problemStatement.innerHTML = problem.statement;
+      problemExample.innerHTML = problem.example;
+
+      // Handle solution submission
+      submitButton.addEventListener('click', async () => {
+        const userAnswer = solutionInput.value.trim().toLowerCase();
+        if (!userAnswer) {
+          feedbackDiv.className = 'feedback-message error';
+          feedbackDiv.textContent = 'Please enter a solution before submitting.';
+          return;
+        }
+
+        const user = await checkUser();
+        if (!user) {
+          feedbackDiv.className = 'feedback-message error';
+          feedbackDiv.textContent = 'Please log in to submit a solution.';
+          window.location.href = 'login.html';
+          return;
+        }
+
+        // Check if the answer contains all expected keywords
+        const isCorrect = problem.keywords.every(keyword => userAnswer.includes(keyword.toLowerCase()));
+
+        // Save submission to database
+        const { error: submissionError } = await supabase
+          .from('submissions')
+          .insert({
+            user_id: user.id,
+            problem_id: problemId,
+            solution: userAnswer,
+            is_correct: isCorrect
+          });
+
+        if (submissionError) {
+          feedbackDiv.className = 'feedback-message error';
+          feedbackDiv.textContent = 'Error saving submission. Please try again.';
+          return;
+        }
+
+        if (isCorrect) {
+          feedbackDiv.className = 'feedback-message success';
+          feedbackDiv.textContent = problem.success_message;
+        } else {
+          feedbackDiv.className = 'feedback-message error';
+          feedbackDiv.textContent = `Incorrect. Ensure your solution includes the key points (e.g., ${problem.keywords.join(', ')}). Try again or read the editorial for more details.`;
+        }
+      });
+    }
+    loadProblem();
+  </script>
+</body>
+</html>
